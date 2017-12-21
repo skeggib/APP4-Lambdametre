@@ -50,12 +50,7 @@ void loop() {
       break;
     
     case Computing:
-      //Serial.println("Computing");
-      //Serial.print("Franges : ");
-      //Serial.print(fringeCount);
-      //Serial.print(", Fentes : ");
-      //Serial.print(slotCount);
-      //Serial.print(", Ratio : ");
+      Serial.print("rF = ");
       Serial.print((double)fringeCount / 2.0);
       Serial.print(" Hz");
       Serial.println("");
