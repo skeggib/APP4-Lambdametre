@@ -20,10 +20,10 @@ void setup() {
   pinMode(slotPin, INPUT);
   pinMode(usefulPin, INPUT);
   
-  /*attachInterrupt(
+  attachInterrupt(
     digitalPinToInterrupt(movementPin),
     interruptMovement,
-    CHANGE);*/
+    CHANGE);
   attachInterrupt(
     digitalPinToInterrupt(slotPin),
     interruptSlot,
