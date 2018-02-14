@@ -1,0 +1,2 @@
+- No global variables in headers
+- Function definition in header to increase readability
