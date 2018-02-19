@@ -5,8 +5,17 @@
 #include "efficiency.h"
 #include "display.h"
 #include "pins.h"
+#include "config.h"
+#include "communication.h"
 
 // --- GLOBAL VARIABLES
+
+configuration Configuration;
+
+double Lambda = -1; // Last computed lambda
+unsigned int LastMaxFringeCount = 0;
+unsigned int LastMaxSlotCount = 0;
+double Efficiency = -1; // Last computed efficiency
 
 unsigned long FringeCount = 0; // Number of fringes counted since the last "useful signal" raising edge
 unsigned long SlotCount = 0; // Number of slots counted since the last "useful signal" raising edge
@@ -26,7 +35,6 @@ LiquidCrystal Lcd(PIN_LCD_RS, PIN_LCD_E, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PIN
 
 void setup()
 {
-  // TODO remove for release
   Serial.begin(9600);
   while (!Serial) { }
   
@@ -40,11 +48,51 @@ void setup()
   
   pinMode(PIN_USEFUL, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_USEFUL), usefulInterrupt, CHANGE);
+
+  configuration memConfig = readConfiguration();
+  if (memConfig.check == 1)
+    Configuration = memConfig;
 }
 
 void loop()
 {
-  
+  if (Serial.available() > 0)
+  {
+    int received = Serial.read();
+    switch (received)
+    {
+      case (int)'r':
+        Serial.println(Lambda);
+        break;
+      case (int)'c':
+        {
+          float f = readSerialFloat();
+          if (!isnan(f))
+          {
+            Configuration.slot_step = f;
+            write_configuration(Configuration);
+            Serial.println(Configuration.slot_step);
+          }
+        }
+        break;
+      case (int)'l':
+        {
+          float f = readSerialFloat();
+          if (!isnan(f))
+          {
+            float slotStep = getStep(LastMaxFringeCount, LastMaxSlotCount, f);
+            if (slotStep != -1)
+              Configuration.slot_step = slotStep;
+            write_configuration(Configuration);
+            Serial.println(Configuration.slot_step);
+          }
+        }
+        break;
+      case (int)'v':
+        Serial.println(Configuration.slot_step);
+        break;
+    }
+  }
 }
 
 // --- HANDLERS AND INTERRUPTIONS
@@ -97,11 +145,15 @@ void movementInterrupt()
     NVIC_DisableIRQ(TC1_IRQn);
 
     // Calcul et affichage du lambda
-    displayLambda(getLambda(MaxFringeCount, MaxSlotCount), Lcd);
+    Lambda = getLambda(MaxFringeCount, MaxSlotCount, Configuration.slot_step);
+    displayLambda(Lambda, Lcd);
+    LastMaxFringeCount = MaxFringeCount;
     MaxFringeCount = 0;
+    LastMaxSlotCount = MaxSlotCount;
     MaxSlotCount = 0;
-    
-    displayEfficiency(getEfficiency(SlotCountWhenUsefulHigh, SlotCountWhenUsefulLow), Lcd);
+
+    Efficiency = getEfficiency(SlotCountWhenUsefulHigh, SlotCountWhenUsefulLow);
+    displayEfficiency(Efficiency, Lcd);
     ReadEfficiency = true;
   }
 

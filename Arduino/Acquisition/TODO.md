@@ -3,4 +3,5 @@
 - Fonction setup PWM
 - LCD
 - Communication port serie (envoi infos + etalonnage)
-- Menu
+- Menu ?
+- double/float ?
