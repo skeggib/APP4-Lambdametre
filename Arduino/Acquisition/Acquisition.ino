@@ -12,22 +12,27 @@
 
 configuration Configuration;
 
-double Lambda = -1; // Last computed lambda
+double Lambda = -1; // Dernier lambda calcule
 unsigned int LastMaxFringeCount = 0;
 unsigned int LastMaxSlotCount = 0;
-double Efficiency = -1; // Last computed efficiency
+double Efficiency = -1; // Derniere efficience calculee
 
-unsigned long FringeCount = 0; // Number of fringes counted since the last "useful signal" raising edge
-unsigned long SlotCount = 0; // Number of slots counted since the last "useful signal" raising edge
+unsigned long CurrentUsefulFringeCount = 0; // Nombre de franges comptee depuis le dernier front montant du signal utile
+unsigned long CurrentUsefulSlotCount = 0; // Nombre de fentes comptee depuis le dernier front montant du signal utile
 
-// The following variables are used to compute the lambda
-unsigned long MaxFringeCount = 0; // Maximum fringes counted in one time since the last "movement signal" raising edge
-unsigned long MaxSlotCount = 0; // Maximum slots counted in one time since the last "movement signal" raising edge
+unsigned long MaxFringeCount = 0; // Maximum de franges comptee pendant une periode utile
+unsigned long MaxSlotCount = 0; // Maximum de fentes comptee pendant une periode utile
 
-bool ReadEfficiency = true;
+bool ReadEfficiency = true; // Indique si l'efficience doit etre lue ou non
 unsigned long TempSlotCountWhenUsefulHigh = 0;
 unsigned long SlotCountWhenUsefulHigh = 0;
 unsigned long SlotCountWhenUsefulLow = 0;
+
+bool InMovement = true; // Indique si le bloc oscillant est en mouvement
+
+// Utilise pour le calcul de la frequence des fentes et du mouvement du bloc oscillant
+int SlotFreqIndex = 0;
+long SlotFreqValues[3];
 
 LiquidCrystal Lcd(PIN_LCD_RS, PIN_LCD_E, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PIN_LCD_D7);
 
@@ -40,15 +45,15 @@ void setup()
   
   Lcd.begin(16, 2);
 
-  setup_TC0_0();
-  setup_TC0_1();
-
-  pinMode(PIN_MOVEMENT, INPUT);
-  attachInterrupt(digitalPinToInterrupt(PIN_MOVEMENT), movementInterrupt, CHANGE);
+  // Setup des timers/counters
+  setup_tc_slot_useful();
+  setup_tc_fringe_slot();
+  setup_tc_clock_slot();
   
   pinMode(PIN_USEFUL, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_USEFUL), usefulInterrupt, CHANGE);
 
+  // Lecture de la configuration depuis la memoire
   configuration memConfig = readConfiguration();
   if (memConfig.check == 1)
     Configuration = memConfig;
@@ -56,6 +61,27 @@ void setup()
 
 void loop()
 {
+  // Lecture de la frequence des fentes
+  TC_GetStatus(TC2, 1);
+  SlotFreqValues[SlotFreqIndex] = REG_TC2_RA1;
+  ++SlotFreqIndex;
+  SlotFreqIndex = SlotFreqIndex % 3;
+  // Une moyenne glissante est faite sur les valeurs du TC des fentes
+  int slotFreqMean = SlotFreqValues[0] + SlotFreqValues[1] + SlotFreqValues[2];
+  // Seuil bas de la frequence, en dessous de cette frequence on considere que le bloc est en fin de course
+  if (slotFreqMean < 7000 && InMovement)
+  {
+    InMovement = false;
+    movementStoped();
+  }
+  // Seuil haut de la frequence, au dessus de cette frequence on considere que le bloc est en mouvement
+  else if (slotFreqMean > 40000 && !InMovement)
+  {
+    InMovement = true;
+    movementStarted();
+  }
+
+  // IO port serie
   if (Serial.available() > 0)
   {
     int received = Serial.read();
@@ -95,9 +121,9 @@ void loop()
   }
 }
 
-// --- HANDLERS AND INTERRUPTIONS
+// --- HANDLERS ET INTERRUPTIONS
 
-void TC0_Handler()
+void TC6_Handler()
 {
   TC_GetStatus(TC0, 0);
   bool isUsefulSignalHigh = !((REG_TC0_SR0 >> 17) & 0b1);
@@ -121,72 +147,47 @@ void TC0_Handler()
   }
 }
 
-/**
- * Called each time the state of the slot signal changes
- */
 void TC1_Handler(){
   TC_GetStatus(TC0, 1); // get status, TC0 channel 1, allow the interrupt to fire again
-  
-  int fringePerSlotCount = REG_TC0_RA1; // get data from capture register A for TC0 channel 1
-  FringeCount += fringePerSlotCount;
-  ++SlotCount;
+  CurrentUsefulFringeCount += REG_TC0_RA1;
+  ++CurrentUsefulSlotCount;
 }
 
-/**
- * Called each time the state of the movement signal changes
- */
-void movementInterrupt()
+void movementStarted()
 {
-  // Bloc oscillant en fin de course
-  if(digitalRead(PIN_MOVEMENT) == LOW)
-  {
-    // On desactive les interruptions du TC
-    NVIC_DisableIRQ(TC0_IRQn);
-    NVIC_DisableIRQ(TC1_IRQn);
-
-    // Calcul et affichage du lambda
-    Lambda = getLambda(MaxFringeCount, MaxSlotCount, Configuration.slot_step);
-    displayLambda(Lambda, Lcd);
-    LastMaxFringeCount = MaxFringeCount;
-    MaxFringeCount = 0;
-    LastMaxSlotCount = MaxSlotCount;
-    MaxSlotCount = 0;
-
-    Efficiency = getEfficiency(SlotCountWhenUsefulHigh, SlotCountWhenUsefulLow);
-    displayEfficiency(Efficiency, Lcd);
-    ReadEfficiency = true;
-  }
-
-  // Bloc oscillant en mouvement
-  else
-  {
-    // On active les interruptions du TC
-    NVIC_EnableIRQ(TC0_IRQn);
-    NVIC_EnableIRQ(TC1_IRQn);
-  }
+  
 }
 
-/**
- * On each falling edge of the "useful signal" we update the
- * maximum slot and fringe variables.
- * On each rising edge we reset the slot and fringe counters
- * to count only when the "useful signal" is high.
- */
+void movementStoped()
+{
+  // Calcul et affichage du lambda
+  Lambda = getLambda(MaxFringeCount, MaxSlotCount, Configuration.slot_step);
+  displayLambda(Lambda, Lcd);
+  LastMaxFringeCount = MaxFringeCount;
+  MaxFringeCount = 0;
+  LastMaxSlotCount = MaxSlotCount;
+  MaxSlotCount = 0;
+
+  Efficiency = getEfficiency(SlotCountWhenUsefulHigh, SlotCountWhenUsefulLow);
+  displayEfficiency(Efficiency, Lcd);
+  ReadEfficiency = true;
+}
+
 void usefulInterrupt()
 {
   if (digitalRead(PIN_USEFUL) == LOW)
   {
-    if (SlotCount > MaxSlotCount)
+    if (CurrentUsefulSlotCount > MaxSlotCount)
     {
-      MaxSlotCount = SlotCount;
-      MaxFringeCount = FringeCount;
+      MaxSlotCount = CurrentUsefulSlotCount;
+      MaxFringeCount = CurrentUsefulFringeCount;
     }
   }
 
   else
   {
-    SlotCount = 0;
-    FringeCount = 0;
+    CurrentUsefulSlotCount = 0;
+    CurrentUsefulFringeCount = 0;
   }
 }
 
