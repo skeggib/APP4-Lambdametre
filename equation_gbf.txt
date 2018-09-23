@@ -1,0 +1,4 @@
+#Change the range according to your settings
+range(0,1ms)
+#Your equation goes here
+int(Sin(3*(w-pi)^2)+1)

@@ -69,13 +69,13 @@ void loop()
   // Une moyenne glissante est faite sur les valeurs du TC des fentes
   int slotFreqMean = SlotFreqValues[0] + SlotFreqValues[1] + SlotFreqValues[2];
   // Seuil bas de la frequence, en dessous de cette frequence on considere que le bloc est en fin de course
-  if (slotFreqMean < 7000 && InMovement)
+  if (slotFreqMean > 160000 && InMovement)
   {
     InMovement = false;
     movementStoped();
   }
   // Seuil haut de la frequence, au dessus de cette frequence on considere que le bloc est en mouvement
-  else if (slotFreqMean > 40000 && !InMovement)
+  else if (slotFreqMean < 20000 && !InMovement)
   {
     InMovement = true;
     movementStarted();
@@ -87,9 +87,19 @@ void loop()
     int received = Serial.read();
     switch (received)
     {
+      // Send lambda
       case (int)'r':
         Serial.println(Lambda);
         break;
+      // Send efficiency
+      case (int)'e':
+        Serial.println(Efficiency);
+        break;
+      // Get slot step
+      case (int)'v':
+        Serial.println(Configuration.slot_step);
+        break;
+      // Receive slot step
       case (int)'c':
         {
           float f = readSerialFloat();
@@ -101,6 +111,7 @@ void loop()
           }
         }
         break;
+      // Receive target lambda
       case (int)'l':
         {
           float f = readSerialFloat();
@@ -113,9 +124,6 @@ void loop()
             Serial.println(Configuration.slot_step);
           }
         }
-        break;
-      case (int)'v':
-        Serial.println(Configuration.slot_step);
         break;
     }
   }
@@ -155,12 +163,22 @@ void TC1_Handler(){
 
 void movementStarted()
 {
-  
+  //Serial.println("Start");
 }
 
 void movementStoped()
 {
+  //Serial.println("Stop");
   // Calcul et affichage du lambda
+  
+  if (CurrentUsefulSlotCount > MaxSlotCount)
+  {
+    MaxSlotCount = CurrentUsefulSlotCount;
+    MaxFringeCount = CurrentUsefulFringeCount;
+  }
+  CurrentUsefulSlotCount = 0;
+  CurrentUsefulFringeCount = 0;
+  
   Lambda = getLambda(MaxFringeCount, MaxSlotCount, Configuration.slot_step);
   displayLambda(Lambda, Lcd);
   LastMaxFringeCount = MaxFringeCount;
